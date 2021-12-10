@@ -79,380 +79,247 @@ gcafb gcf dcaebfg ecagb gf abcdeg gaef cafbge fdbac fegbdc | fgae cfgab fg bagce
    9 #{:A :B :C :D :F :G}})
 
 
-(def wire-count->potential-digits
-  (reduce (fn [r [digit segs]]
-            (update r
-                    (count segs)
-                    (fnil conj #{})
-                    digit))
+(def test-pattern "acedgfb cdfbe gcdfa fbcad dab cefabd cdfgeb eafb cagedb ab | cdfeb fcadb cdfeb cdbaf")
+
+(read-input test-pattern)
+
+
+; ### Step 1
+; Map patterns to potential digits via pattern size.
+; * $P_1$ has 2 wires.  
+; * $P_7$ has 3 wires.
+; * $P_4$ has 4 wires. 
+; * $P_2$, $P_3$, and $P_5$ all have 5 wires.
+; * $P_6$, $P_9$, and $P_0$ all have 6 wires.
+; * $P_8$ has 7 wires.
+
+
+(def count->potential-digits
+  (reduce (fn [cpd [digit segs]]
+            (update cpd (count segs) (fnil conj #{}) digit))
           {}
           digit->segments))
 
 
-(def init-segment->potential-wires 
-  {:A #{:a :b :c :d :e :f :g}
-   :B #{:a :b :c :d :e :f :g}
-   :C #{:a :b :c :d :e :f :g}
-   :D #{:a :b :c :d :e :f :g}
-   :E #{:a :b :c :d :e :f :g}
-   :F #{:a :b :c :d :e :f :g}
-   :G #{:a :b :c :d :e :f :g}})
+(defn init-pattern->potential-digits
+  [unique-patterns]
+  (reduce (fn [ppd pattern]
+            (assoc ppd pattern (count->potential-digits (count pattern))))
+          {}
+          unique-patterns))
 
 
-(defn init-pattern->possible-digits
-  [pattern]
-  (zipmap pattern
-          (map #(wire-count->potential-digits (count %)) pattern)))
+(def init-segment->potential-wires
+  (zipmap [:A :B :C :D :E :F :G]
+          (repeat #{:a :b :c :d :e :f :g})))
 
 
-
-(def test-patterns
-  [#{:a :c :e :d :g :f :b}
-   #{:c :a :g :e :d :b}
-   #{:c :e :f :a :b :d}
-   #{:c :d :f :g :e :b}
-   #{:c :d :f :b :e}
-   #{:g :c :d :f :a}
-   #{:f :b :c :a :d}
-   #{:e :a :f :b}
-   #{:d :a :b}
-   #{:a :b}])
+(defn init-state
+  [{:keys [unique]}]
+  {:segment->potential-wires init-segment->potential-wires
+   :pattern->potential-digits (init-pattern->potential-digits unique)})
 
 
-(init-pattern->possible-digits test-patterns)
+; *nextjournal.clerk renders pattern->potential-digits incorrectly*
+(init-state (first (read-input test-pattern)))
 
-; why doesn't the "x more..." expansion work anymore...
-{#{:b :a} #{1}
- #{:b :d :a} #{7}
- #{:e :b :f :a} #{4}
- #{:c :b :d :f :a} #{3 2 5}
- #{:e :c :b :d :f} #{3 2 5}
- #{:g :c :d :f :a} #{3 2 5}
- #{:e :g :c :b :d :a} #{0 6 9}
- #{:e :g :c :b :d :f} #{0 6 9}
- #{:e :c :b :d :f :a} #{0 6 9}
- #{:e :g :c :b :d :f :a} #{8}}
 
-; This function removes possibilities from the segment->potential-wires mapping 
-; when a set of wires is known to be a single digit.
-;
-; Algorithm:
-; * `W = ` the wires in the given pattern
-; * `S = ` the segments that make up the given digit. 
-; * For each segment `s`:
-;   * if $s \in S$ then $s = s \bigcap W$ 
-;   * otherwise $s = s - W$
-;   
+; ### Step 2
+; Given an initial mapping of segments to potential wires where each segment
+; could be mapped to any wire update it by using the patterns that are 
+; already know. Which are the $P_1$, $P_7$, and $P_4$.
+
 (defn update-segment->potential-wires-for-known-digit
-  [segment->potential-wires wires digit]
-  (let [segments (digit->segments digit)]
-    (reduce (fn [spw [seg pot-wires]]
-              (assoc spw
-                     seg
-                     (if (contains? segments seg)
-                       (sets/intersection pot-wires wires)
-                       (sets/difference pot-wires wires))))
-            {}
-            segment->potential-wires)))
-
-; For example there is only one pattern with two wires. This pattern
-; corresponds to the `1` digit. The segments `:C` and `:F` are updated like
-; with set intersection:
-;
-; $C = C \bigcap \{a b\}$
-;
-; $F = F \bigcap \{a b\}$
-; 
-; all others are updated with
-; 
-; $X = X - \{a b\}$ 
-; 
-; This results in the `:C` and `:F` segments having the potential wires of only
-; `:a` and  `:b`. The rest of the segments can't be `:a` or `:b` so those wires
-; are removed from their potential wires.
-(update-segment->potential-wires-for-known-digit init-segment->potential-wires #{:a :b} 1)
+  [state pattern digit]
+  (update state
+          :segment->potential-wires
+          #(let [digit-segs (digit->segments digit)]
+             (reduce (fn [spw [seg pw]]
+                       (update spw
+                               seg
+                               (if (contains? digit-segs seg)
+                                 sets/intersection
+                                 sets/difference)
+                               pattern))
+                     % 
+                     %))))
 
 
-; This can be done with all the digits that are known right at the beginning:
-; `1`, `7`, and `4`. `8` could also be done but it doesn't change the potential
-; wires for any segment because all segments are used for 8.
-(-> init-segment->potential-wires
-    (update-segment->potential-wires-for-known-digit #{:a :b} 1)
-    (update-segment->potential-wires-for-known-digit #{:d :a :b} 7)
-    (update-segment->potential-wires-for-known-digit #{:e :b :f :a} 4))
-
-
-; Now a new strategy is needed to reduce the possibilities. 
-;
-; The pattern `#{:c :b :d :f :a}` could still be a `2`, `3`, or `5` because
-; those digits all use 4 segments. If any of the patterns with known digits
-; are subsets of this pattern then it might be possible to remove some potential
-; digits.
-; 
-; For example the pattern `#{:d :a :b}` is the pattern for `7` so it must use
-; the segments `A`, `C`, and `F`. Because `#{:c :b :d :f :a}` is a superset of
-; `#{:d :a :b}` then `#{:c :b :d :f :a}` must use the same segments.
-; 
-; Now since `#{:c :b :d :f :a}` can be a `2`, `3`, or `5` and must also use
-; segments `A`, `C`, and `F` maybe some of the digits can be eliminated.
-; 
-; * `2` uses segments `#{:A :C :D :E :G}` which doesn't have `F` so `2` can be
-; eliminated.
-;
-; * `3` uses segments `#{:A :C :D :F :G}` which is a superset of `#{:A :C :F}`
-; so `3` is still a potential digit.
-;
-; * `5` uses segments `#{:A :B :D :F :G}` which is not a supser set of 
-; `#{:A :C :F}` so `5` can be eliminated.
-;
-; After all this `#{:c :b :d :f :a}` must be the pattern for `3`. The mapping
-; `pattern->possible-digits` can be updated. Also the `segment->potential`
-; wires can be updated. 
-
-(defn largest-subset-pattern-with-known-digit
-  [pattern->possible-digits pattern]
-  (->> pattern->possible-digits
-       (filter #(and (= 1 (count (val %)))
-                     (sets/subset? (key %) pattern)))
-       (sort-by #(- (count (key %))))
-       (first)))
-
-
-(defn digit-contains-segments? 
-  [digit segments]
-  (sets/subset? segments (digit->segments digit)))
-
-
-(defn potential-digits-by-subset
-  [pattern->possible-digits pattern]
-  (if-let [[_ ds] (largest-subset-pattern-with-known-digit pattern->possible-digits pattern)]
-    (let [overlapping-segments (digit->segments (first ds))]
-      (into #{}
-            (filter #(digit-contains-segments? % overlapping-segments))
-            (pattern->possible-digits pattern)))))
-
-
-(potential-digits-by-subset
-  (init-pattern->possible-digits test-patterns)
-  #{:c :b :d :f :a})
-
-(potential-digits-by-subset
-  (init-pattern->possible-digits test-patterns)
-  #{:e :c :b :d :f})
-
-(potential-digits-by-subset
-  (init-pattern->possible-digits test-patterns)
-  #{:e :c :b :d :f})
-
-(defn update-pattern->possible-digits-for-known-digit
-  [pattern->possible-digits pattern digit]
-  (reduce (fn [ppd [p pd]]
-            (assoc ppd
-                   p
-                   (if (= p pattern)
-                     #{digit}
-                     (disj pd digit))))
-          {}
-          pattern->possible-digits))
-
-(update-pattern->possible-digits-for-known-digit 
-  (init-pattern->possible-digits test-patterns)
-  #{:c :b :d :f :a}
-  3)
-
-(-> init-segment->potential-wires
-    (update-segment->potential-wires-for-known-digit #{:a :b} 1)
-    (update-segment->potential-wires-for-known-digit #{:d :a :b} 7)
-    (update-segment->potential-wires-for-known-digit #{:e :b :f :a} 4)
-    (update-segment->potential-wires-for-known-digit #{:c :b :d :f :a} 3))
-
-
-; On paper I only did the 5 segment patterns. But it appears there might be 
-; some more info
-(let [pattern->possible-digits (init-pattern->possible-digits test-patterns)]
-  (map (juxt identity #(potential-digits-by-subset pattern->possible-digits %))
-       (keys pattern->possible-digits)))
-
-; `#{:a :b :c :d :f} [3]`
-; `#{:a :b :c :d :e :g} [0 9]`
-; `#{:a :b :c :d :e :f} [9]`
-
-(-> init-segment->potential-wires
-    (update-segment->potential-wires-for-known-digit #{:a :b} 1)
-    (update-segment->potential-wires-for-known-digit #{:d :a :b} 7)
-    (update-segment->potential-wires-for-known-digit #{:e :b :f :a} 4)
-    (update-segment->potential-wires-for-known-digit #{:c :b :d :f :a} 3)
-    (update-segment->potential-wires-for-known-digit #{:a :b :c :d :e :f} 9)
-    (update-segment->potential-wires-for-known-digit #{:a :b :c :d :e :g} 0))
-
-
-; clerk isn't going to render this correctly!
-(-> (init-pattern->possible-digits test-patterns)
-    (update-pattern->possible-digits-for-known-digit #{:c :b :d :f :a} 3)
-    (update-pattern->possible-digits-for-known-digit #{:a :b :c :d :e :f} 9)
-    (update-pattern->possible-digits-for-known-digit #{:a :b :c :d :e :g} 0))
-
-
-
-; Still need a third strategy for eliminating possibilities.
-; Need to use known segment->potential-wires entries.
-
-; Example:
-;
-; `#{:g :c :e :f :a}` can be one of `#{2 5}`
-;
-; Given this state of segment->potential-wires:
-; `{:A #{:d} :B #{:e} :C #{:a :b} :D #{:f} :E #{:g} :F #{:a :b} :G #{:c}}`
-; 
-; Can the pattern be 2?
-; Required segments `#{:A :C :D :E :G}` 
-; 
-; Map to known wires: `#{:d :f :g :c :a}` 
-; 
-;
-(sets/subset? #{:d :f :g :c :a} #{:g :c :d :f :a})
-; So it can be a 2.
-;
-; What about a 5?
-; Required segments `#{:A :B :D :F :G}` 
-;
-; Map to known wires: `#{:d :e :f :c} 
-(sets/subset? #{:d :e :f :c :a} #{:g :c :d :f :a})
-; So it can't be a 5.
-;
-; 
-
-
-; now there are valid mappings
-(-> init-segment->potential-wires
-    (update-segment->potential-wires-for-known-digit #{:a :b} 1)
-    (update-segment->potential-wires-for-known-digit #{:d :a :b} 7)
-    (update-segment->potential-wires-for-known-digit #{:e :b :f :a} 4)
-    (update-segment->potential-wires-for-known-digit #{:c :b :d :f :a} 3)
-    (update-segment->potential-wires-for-known-digit #{:a :b :c :d :e :f} 9)
-    (update-segment->potential-wires-for-known-digit #{:a :b :c :d :e :g} 0)
-    (update-segment->potential-wires-for-known-digit #{:g :c :d :f :a} 2))
-
-
-; clerk isn't going to render this correctly!
-(-> (init-pattern->possible-digits test-patterns)
-    (update-pattern->possible-digits-for-known-digit #{:c :b :d :f :a} 3)
-    (update-pattern->possible-digits-for-known-digit #{:a :b :c :d :e :f} 9)
-    (update-pattern->possible-digits-for-known-digit #{:a :b :c :d :e :g} 0)
-    (update-pattern->possible-digits-for-known-digit #{:g :c :d :f :a} 2))
-
-
-(def example-pattern->digit
-  (-> (init-pattern->possible-digits test-patterns)
-      (update-pattern->possible-digits-for-known-digit #{:c :b :d :f :a} 3)
-      (update-pattern->possible-digits-for-known-digit #{:a :b :c :d :e :f} 9)
-      (update-pattern->possible-digits-for-known-digit #{:a :b :c :d :e :g} 0)
-      (update-pattern->possible-digits-for-known-digit #{:g :c :d :f :a} 2)))
-
-
-
-(def test-display
-  (map #(into #{} (map (comp keyword str)) %) ["cdfeb" "fcadb" "cdfeb" "cdbaf"]))
-
-; Well at least this is the correct answer!
-(map (comp first example-pattern->digit) test-display)
-
-
-; ## The question now is can I put this all together
-;
-; Algorithm
-; * Input: a line from the input: the unique patterns and display patterns
-; * Output: the number that the display shows 
-; * Steps:
-;    * initialize the `pattern->possible-digits` mapping
-;    * initialize the `segment->potential-wires` mapping
-;    * loop until the pattern->possible-digits is complete
-; TODO add round creation here
-;       * Strategy 2: the subset/overlapping thing
-;       * Strategy 3: use segment->potential-wires strategy
-;       * if a new known pattern->digit mapping is found then use Strategy 1
-;         to update the mappings
-;    * using the completed patter->potential-wires mapping map the display
-;      patterns.
-
-(defn init-segment->potential-wires2
-  [pattern->possible-digits]
-  (reduce (fn [segment->potential-wires [pattern possible-digits]]
-            (if (= 1 (count possible-digits))
+(defn step2
+  [{:keys [pattern->potential-digits] :as state}]
+  (reduce (fn [state [pattern pd]]
+            (if (= 1 (count pd))
               (update-segment->potential-wires-for-known-digit
-                segment->potential-wires
+                state
                 pattern
-                (first possible-digits))
-              segment->potential-wires))
-          init-segment->potential-wires 
-          pattern->possible-digits))
+                (first pd))
+              state))
+          state
+          pattern->potential-digits))
 
 
-(defn ambigous-patterns
-  [pattern->possible-digits]
-  (->> pattern->possible-digits
-       (filter #(< 1 (count (val %))))
-       (sort-by (comp count key))))
+; *nextjournal.clerk renders pattern->potential-digits incorrectly*
+(step2 (init-state (first (read-input test-pattern))))
 
 
-(defn done?
-  [pattern->possible-digits]
-  (every? #(= 1 (count (val %))) pattern->possible-digits))
+; ### Step 3
+; The next step is to figure out which pattern match the digit 3.
+; Because $P_3 \supset P_1$ and $P_2 \supset P_1, P_5 \supset P_1$ can not 
+; also be true then only one pattern can be $P_3$ out of the patterns than can
+; be 2, 3, or 5.
+
+(defn patterns-of-size
+  [pattern->potential-digits n]
+  (into []
+        (comp (map key)
+              (filter #(= n (count %))))
+        pattern->potential-digits))
 
 
-(defn update-pattern->possible-digits
-  [pattern->possible-digits pattern possible-digits]
-  (reduce (fn [ppd [p pd]]
-            (assoc ppd
-                   p
-                   (if (= p pattern)
-                     (sets/intersection pd possible-digits)
-                     (if (= 1 (count possible-digits))
-                       (sets/difference pd possible-digits)
-                       pd))))
-          {}
-          pattern->possible-digits))
+(defn update-pattern->potential-digits-for-known-digit
+  [state pattern digit]
+  (update state
+          :pattern->potential-digits
+          #(reduce (fn [ppd [p pd]]
+                     (assoc ppd
+                            p
+                            (if (= p pattern)
+                              #{digit}
+                              (disj pd digit))))
+                   %
+                   %)))
 
 
-(defn remove-known-digits
-  [pattern->possible-digits]
-  (let [known-digits (into #{}
-                           (comp (map val)
-                                 (filter #(= 1 (count %)))
-                                 (map first))
-                           pattern->possible-digits)]
-    (reduce (fn [ppd [pattern digits]]
-              (assoc ppd
-                     pattern
-                     (if (= 1 (count digits))
-                       digits
-                       (sets/difference digits known-digits))))
-            {}
-            pattern->possible-digits)))
+(defn step3
+  [{:keys [pattern->potential-digits] :as state}]
+  (let [p1 (first (patterns-of-size pattern->potential-digits 2))
+        p3 (first (filter #(sets/subset? p1 %)
+                          (patterns-of-size pattern->potential-digits 5)))]
+    (-> state
+        (update-segment->potential-wires-for-known-digit p3 3)
+        (update-pattern->potential-digits-for-known-digit p3 3))))
 
 
-(defn strategy2
-  [pattern->possible-digits]
-  (transduce (comp (map (juxt key
-                              #(potential-digits-by-subset
-                                 pattern->possible-digits (key %))))
-                   (filter #(some? (second %))))
-             (completing
-               (fn [ppd [pattern digits]]
-                 (update-pattern->possible-digits ppd pattern digits))
-               remove-known-digits)
-             pattern->possible-digits
-             (ambigous-patterns pattern->possible-digits)))
+; *nextjournal.clerk renders pattern->potential-digits incorrectly*
+(-> (init-state (first (read-input test-pattern)))
+    step2
+    step3)
 
 
-(defn solve-single-display
-  [{:keys [display unique]}]
-  (let [pattern->possible-digits (init-pattern->possible-digits unique)
-        segment->potential-wires (init-segment->potential-wires2 pattern->possible-digits)]
-    (strategy2 pattern->possible-digits)))
+; ### Step 4
+; Similar to Step 3 it turns out that $P_9 \supset P_4$ and $P_6 \supset P_4$ 
+; is *not* true and $P_0 \subset P_4$ is also *not* true. This will yield any
+; new info for `segment->potential-wires` but will for
+; `pattern->potential-wires`.
+
+(defn step4
+  [{:keys [pattern->potential-digits] :as state}]
+  (let [p4 (first (patterns-of-size pattern->potential-digits 4))
+        p9 (first (filter #(sets/subset? p4 %)
+                          (patterns-of-size pattern->potential-digits 6)))]
+    (update-pattern->potential-digits-for-known-digit state p9 9)))
 
 
-(def test-line "acedgfb cdfbe gcdfa fbcad dab cefabd cdfgeb eafb cagedb ab | cdfeb fcadb cdfeb cdbaf")
+; *nextjournal.clerk renders pattern->potential-digits incorrectly*
+(-> (init-state (first (read-input test-pattern)))
+    step2
+    step3
+    step4)
 
-(solve-single-display (first (read-input test-line)))
-(clojure.pprint/pprint (solve-single-display (first (read-input test-line))))
+
+(defn find-potential-patterns-for-digit
+  [pattern->potential-digits d]
+  (into []
+        (comp (filter #(contains? (val %) d))
+              (map key))
+        pattern->potential-digits))
+
+
+; ### Step 5
+; At this point only the potential wires for segments `:C` and `:F` are
+; ambiguous. So a digit who's pattern that only contains `:C` or `:F` but not 
+; both. One such digit is 2. At this point the wires for `:A`, `:D`, `:E` and
+; `:G` are known. So $P_2 \supset \{ w_A, w_D, w_E, w_G \}$.
+
+(defn step5
+  [{:keys [pattern->potential-digits segment->potential-wires] :as state}]
+  (let [subset (sets/union (segment->potential-wires :A)
+                           (segment->potential-wires :D)
+                           (segment->potential-wires :E)
+                           (segment->potential-wires :G))
+        [p2] (filter #(sets/subset? subset %)
+                     (find-potential-patterns-for-digit
+                       pattern->potential-digits 2))]
+    (-> state
+        (update-segment->potential-wires-for-known-digit p2 2)
+        (update-pattern->potential-digits-for-known-digit p2 2))))
+
+
+; *nextjournal.clerk renders pattern->potential-digits incorrectly*
+(-> (init-state (first (read-input test-pattern)))
+    step2
+    step3
+    step4
+    step5)
+
+
+; ### Step 6
+; At this point all the segments are only mapped to one wire! Finally. However
+; the patterns $P_6$ and $P_0$ are still ambiguous. They can be found via by
+; using `segment->potential-wires`.
+
+(defn pattern-for-digit
+  [segment->potential-wires digit]
+  (transduce (map segment->potential-wires)
+             sets/union
+             (digit->segments digit)))
+
+
+(defn step6
+  [{:keys [segment->potential-wires] :as state}]
+  (update-pattern->potential-digits-for-known-digit
+    state
+    (pattern-for-digit segment->potential-wires 6)
+    6))
+
+
+; *nextjournal.clerk renders pattern->potential-digits incorrectly*
+(-> (init-state (first (read-input test-pattern)))
+    step2
+    step3
+    step4
+    step5
+    step6)
+
+
+; ### Map display pattern to digits
+(defn map-display*
+  [pattern->potential-digits display]
+  (->> (map (comp first pattern->potential-digits) display)
+       (apply str)
+       (Long/valueOf)))
+
+
+(defn map-display
+  [{:keys [display] :as input}]
+  (map-display* (-> (init-state input)
+                    step2
+                    step3
+                    step4
+                    step5
+                    step6
+                    :pattern->potential-digits)
+                display))
+
+
+; ***Success!***
+(map-display (first (read-input test-pattern)))
+
+
+(defn solve-part2
+  [input]
+  (transduce (map map-display) + input))
+
+
+(solve-part2 (read-input test-input))
+(solve-part2 (read-input real-input))
