@@ -31,87 +31,14 @@ BC -> B
 CC -> N
 CN -> C")
 
-
+; Turns out that only count of each pair needs to be maintained. And the last
+; element which never changes.
 (defn read-input
-  [input]
-  (let [[temp sbs] (string/split input #"\n\n")]
-    {:temp temp
-     :sbs (map #(string/split % #" \-\> ") (string/split-lines sbs))}))
-
-
-(read-input test-input)
-
-
-(defn find-pair
-  [temp pair]
-  (into []
-        (comp (map-indexed vector)
-              (filter #(= pair (apply str (second %))))
-              (map first))
-        (partition 2 1 temp)))
-
-
-(defn insert-pairs
-  [temp sbs]
-  (transduce (map-indexed vector)
-             (completing
-               (fn [new-temp [pos-i [i c]]]
-                 (let [ri (+ pos-i i)]
-                   (str (subs new-temp 0 (inc ri))
-                        c
-                        (subs new-temp (inc ri))))))
-             temp
-             sbs))
-
-
-
-#_(step (read-input test-input))
-(defn step
-  ([{:keys [temp sbs]}] (step temp sbs))
-  ([temp sbs]
-   {:temp
-    (insert-pairs temp
-                  (sort-by first
-                           (mapcat (fn [[pair c]]
-                                     (map #(vector % c)  (find-pair temp pair))
-                                     )
-                                   sbs)))
-    :sbs sbs}))
-
-(count (:temp (first (drop 10 (iterate step (read-input test-input))))))
-
-
-(defn run
-  [input n]
-  (->> (iterate step input)
-       (drop n)
-       (first)))
-
-
-(defn solve-part1
-  [input]
-  (let [{:keys [temp]} (run input 10)
-        sorted (sort-by val (frequencies temp))
-        [_ f1] (first sorted)
-        [_ f2] (last sorted)]
-    (- f2 f1)))
-
-
-#_(solve-part1 (read-input test-input))
-#_(solve-part1 (read-input real-input))
-
-
-; After browsing around on reddit for clues and things in the #funny section
-; this brute force approach won't work at all. It'll take too long and too much
-; memory.
-
-
-(defn read-input2
   [input]
   (let [[temp sbs] (string/split input #"\n\n")]
     (let  [ps (partition 2 1 temp)]
       {:pairs (frequencies ps) 
-       :last-pair (last ps)
+       :last-el (last temp)
        :sbs (into {}
                   (comp (map #(string/split % #" \-\> "))
                         (map (fn [[[x y] [z]]]
@@ -119,9 +46,12 @@ CN -> C")
                   (string/split-lines sbs))})))
 
 
-(read-input2 test-input)
+(read-input test-input)
 
-
+; Given the current pair counts create new ones using the substitution rules.
+;
+; Example: Given the rule `XY -> Z` the `XY` pairs are replaced with the same
+;          number of `XZ` and `ZY` pairs.
 (defn next-pairs
   [pairs sbs]
   (reduce (fn [np [p c]]
@@ -133,29 +63,13 @@ CN -> C")
           pairs))
 
 
-(defn next-last-pair
-  [last-pair sbs]
-  (second (get sbs last-pair)))
-
-
+; Given the current state create the next state.
 (defn step
-  [{:keys [pairs last-pair sbs] :as input}]
-  (assoc input
-         :pairs (next-pairs pairs sbs)
-         :last-pair (next-last-pair last-pair sbs)))
+  [{:keys [pairs sbs] :as input}]
+  (update input :pairs next-pairs sbs))
 
 
-
-; don't really need to keep track of last pair, just last element. It never
-; changes but isn't counted by only counting the first element of each pair
-(defn count-els
-  [{:keys [pairs last-pair] :as input}]
-  (reduce (fn [freqs [[a b] c]]
-            (update freqs a (fnil + 0) c))
-          {(last last-pair) 1}
-          pairs))
-
-
+; Run the simulation `n` steps.
 (defn run
   [input n]
   (->> (iterate step input)
@@ -163,11 +77,21 @@ CN -> C")
        first))
 
 
+; Return a map of elements to the number of times they appear in the pairs.
+; Since the second element in a pair is the same as the first element in another
+; pair only consider the first element in each pair. To ensure the proper count
+; for the last element start with it's count as 1.
+(defn count-els
+  [{:keys [pairs last-el] :as input}]
+  (reduce (fn [freqs [[a _] c]]
+            (update freqs a (fnil + 0) c))
+          {last-el 1}
+          pairs))
+
+
 (defn most-minus-least
   [input]
-  (let [counts (->> input
-                   count-els
-                   (sort-by val))]
+  (let [counts (->> input count-els (sort-by val))]
     (- (val (last counts))
        (val (first counts)))))
 
@@ -177,8 +101,8 @@ CN -> C")
   (most-minus-least (run input 10)))
 
 
-(solve-part1 (read-input2 test-input))
-(solve-part1 (read-input2 real-input))
+(solve-part1 (read-input test-input))
+(solve-part1 (read-input real-input))
 
 
 (defn solve-part2
@@ -186,5 +110,5 @@ CN -> C")
   (most-minus-least (run input 40)))
 
 
-(solve-part2 (read-input2 test-input))
-(solve-part2 (read-input2 real-input))
+(solve-part2 (read-input test-input))
+(solve-part2 (read-input real-input))
