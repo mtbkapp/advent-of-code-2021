@@ -2,6 +2,7 @@
 
 (ns advent-of-code-2021.day14
   (:require [clojure.java.io :as io]
+            [clojure.set :as sets]
             [clojure.string :as string]
             [nextjournal.clerk :as clerk]
             [nextjournal.clerk.viewer :as v]))
@@ -104,44 +105,86 @@ CN -> C")
 ; this brute force approach won't work at all. It'll take too long and too much
 ; memory.
 
-(init-pairs (read-input test-input))
-(defn init-pairs
-  [{:keys [temp sbs] :as input}]
-  (assoc input
-         :pairs
-         (->> (partition 2 1 temp)
-              (map #(apply str %))
-              (frequencies))))
 
-#_(:pairs (step2 (step2 (step2 (step2 (init-pairs (read-input test-input)))))))
-(defn step2
-  [{:keys [pairs sbs] :as state}]
-  (assoc state
-         :pairs
-         (let [changes (->> (filter (fn [[pair sub]] (contains? pairs pair)) sbs)
-                            (mapcat (fn [[pair sub]]
-                                      (let [[a b] pair]
-                                        [[:remove pair]
-                                         [:add (str a sub)]
-                                         [:add (str sub b)]])))
-                            (group-by first))]
-           (as-> pairs $
-             (reduce (fn [pairs [_ p]]
-                       (dissoc pairs p))
-                     $
-                     (:remove changes))
-             (reduce (fn [pairs [_ p]]
-                       (update pairs p (fnil inc 0)))
-                     $
-                     (:add changes))))))
+(defn read-input2
+  [input]
+  (let [[temp sbs] (string/split input #"\n\n")]
+    (let  [ps (partition 2 1 temp)]
+      {:pairs (frequencies ps) 
+       :last-pair (last ps)
+       :sbs (into {}
+                  (comp (map #(string/split % #" \-\> "))
+                        (map (fn [[[x y] [z]]]
+                               [[x y] [[x z] [z y]]])))
+                  (string/split-lines sbs))})))
 
 
-(defn element-frequencies
-  [{:keys [pairs]}] 
-  (reduce (fn [freqs [pair pair-count]]
-            (-> freqs
-                
-                ))
+(read-input2 test-input)
+
+
+(defn next-pairs
+  [pairs sbs]
+  (reduce (fn [np [p c]]
+            (let [[np1 np2] (get sbs p)]
+              (-> np
+                  (update np1 (fnil + 0) c)
+                  (update np2 (fnil + 0) c))))
           {}
           pairs))
 
+
+(defn next-last-pair
+  [last-pair sbs]
+  (second (get sbs last-pair)))
+
+
+(defn step
+  [{:keys [pairs last-pair sbs] :as input}]
+  (assoc input
+         :pairs (next-pairs pairs sbs)
+         :last-pair (next-last-pair last-pair sbs)))
+
+
+
+; don't really need to keep track of last pair, just last element. It never
+; changes but isn't counted by only counting the first element of each pair
+(defn count-els
+  [{:keys [pairs last-pair] :as input}]
+  (reduce (fn [freqs [[a b] c]]
+            (update freqs a (fnil + 0) c))
+          {(last last-pair) 1}
+          pairs))
+
+
+(defn run
+  [input n]
+  (->> (iterate step input)
+       (drop n)
+       first))
+
+
+(defn most-minus-least
+  [input]
+  (let [counts (->> input
+                   count-els
+                   (sort-by val))]
+    (- (val (last counts))
+       (val (first counts)))))
+
+
+(defn solve-part1
+  [input]
+  (most-minus-least (run input 10)))
+
+
+(solve-part1 (read-input2 test-input))
+(solve-part1 (read-input2 real-input))
+
+
+(defn solve-part2
+  [input]
+  (most-minus-least (run input 40)))
+
+
+(solve-part2 (read-input2 test-input))
+(solve-part2 (read-input2 real-input))
