@@ -26,6 +26,7 @@
   (clojure.pprint/pprint
     (->> (file-seq (clojure.java.io/file "./src/advent_of_code_2021"))
          (filter #(re-seq #"day\d+{2}.clj" (.getName %)))
+         (remove #(.isHidden %))
          (sort-by #(.getName %))
          )
     
