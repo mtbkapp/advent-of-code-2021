@@ -9,16 +9,17 @@
             [nextjournal.clerk :as clerk]
             [nextjournal.clerk.viewer :as v]))
 
+; Since Snailfish numbers are just nested vectors of integers I used Clojure
+; Zippers to navigate around them. It turns out finding the next "left" and
+; "right" integers is super easy with zippers since the `clojure.zip/next` and
+; `clojure.zip/prev` can just be applied repeatedly and do that correct thing
+; when needing to move up/down the nested structure.
 
-(def real-input (slurp (io/resource "day18.txt")))
+; Since splitting is easier than exploding I started there. To find the next
+; splitable location start at the root and keep traversing with `next` until
+; an integer over 10 is found.
 
-
-(defn n->pair
-  [n]
-  [(long (Math/floor (/ n 2.0)))
-   (long (Math/ceil (/ n 2.0)))])
-
-
+; I found some good info on how to use zippers from: [https://grishaev.me/en/clojure-zippers/](https://grishaev.me/en/clojure-zippers/) 
 (defn find-first-splitable
   [z]
   (let [n (zip/node z)]
@@ -27,27 +28,39 @@
           :else (recur (zip/next z)))))
 
 
+(defn n->pair
+  [n]
+  [(long (Math/floor (/ n 2.0)))
+   (long (Math/ceil (/ n 2.0)))])
+
+
 (defn split
   [z]
   (zip/edit z n->pair))
 
-
+ 
 (defn split-first
   [fish-num]
   (if-let [loc (find-first-splitable (zip/vector-zip fish-num))]
     (zip/root (split loc))))
 
 
+; The length of the path to a location in a zipper is the same as it's depth.
+; This means that again just but calling next repeatedly it's possible to go 
+; through the zipper and stop when the conditions are met for an explodable
+; location 
 (defn find-first-explodable
   [z]
   (cond (zip/end? z)
         nil
-        (and (= 4 (count (zip/path z))) (vector? (zip/node z)))  ; Assumption, path length = depth 
+        (and (= 4 (count (zip/path z))) (vector? (zip/node z)))
         z
         :else
         (recur (zip/next z))))
 
 
+; Starting from an explodable location find the next and previous integer
+; locations to they can be updated during the explode operation.
 (defn find-next-int
   [z]
   (cond (zip/end? z) nil
@@ -62,9 +75,13 @@
         :else (recur (zip/prev z))))
 
 
+; This was the trickiest part of the implementation and I'm not very happy with
+; it but it does work. I'm not sure how to save or mark a location in a zipper,
+; go off and do some navigating or editing and return to it. Because of this
+; This implementation goes back up to root and back down the explodable location
+; several times.
 (defn explode
   [fish-num]
-  ; not sure how to mark some location and then return to it after an edit
   (if-let [exz (find-first-explodable (zip/vector-zip fish-num))]
     (let [[L R] (zip/node exz)
           left (find-prev-int exz)
@@ -74,7 +91,8 @@
                     (zip/root)
                     (zip/vector-zip)
                     (find-first-explodable)))
-          right (find-next-int (-> exz zip/next zip/next zip/next)) ; have to move past the numbers in the vector
+          ; have to move past the numbers in the vector at the explodable location  
+          right (find-next-int (-> exz zip/next zip/next zip/next))
           exz (if (nil? right)
                 exz
                 (-> (zip/edit right + R)
@@ -85,6 +103,10 @@
       (zip/root with-zero))))
 
 
+; To ensure the right order of operations in the reduction the `explode` and
+; `split-first` functions return nil if they didn't make any changes and the
+; new snailfish number if they did. They also only operate on the first possible
+; location.
 (defn reduce-step
   [fish-num]
   (if-let [exploded (explode fish-num)]
@@ -93,7 +115,8 @@
       splitted
       fish-num)))
 
-
+; To add two snailfish numbers just put them together in a vector and then keep
+; reducing until no changes are made.
 (defn add-fish-nums
   [fn0 fn1]
   (loop [last-fish-num nil fish-num [fn0 fn1]]
@@ -102,13 +125,7 @@
       (recur fish-num (reduce-step fish-num)))))
 
 
-#_(try 
-    (= [[[[0,7],4],[[7,8],[6,0]]],[8,1]]
-       (add-fish-nums [[[[4,3],4],4],[7,[[8,4],9]]] [1,1]))
-    (catch Exception ex
-      (clojure.pprint/pprint ex)))
-
-
+; Just simple recursion here no need for zippers. 
 (defn mag
   [fish-num]
   (if (vector? fish-num)
@@ -130,12 +147,18 @@
 [[[[5,2],5],[8,[3,7]]],[[5,[7,5]],[4,4]]]")
 
 
+(def real-input (slurp (io/resource "day18.txt")))
+
+
+; It turns out that each line is valid EDN/Clojure.
 (defn read-input
   [input]
   (map #(edn/read-string %)
        (string/split-lines input)))
 
 
+; ## Part 1
+; Just reduce using the addition function already figured out.
 (defn solve-part1
   [input]
   (mag (reduce add-fish-nums input)))
@@ -145,6 +168,9 @@
 (solve-part1 (read-input real-input))
 
 
+; ## Part 2
+; Brute force, cuz it's fast enough. I suspect it would be much faster if the
+; explode step didn't have the traverse from root more than once.
 (defn solve-part2
   [input]
   (reduce (fn [max-mag [n0 n1]]
@@ -153,19 +179,7 @@
           (for [n0 input n1 input :when (not= n0 n1)]
             [n0 n1])))
 
+
 (solve-part2 (read-input test-input))
+(solve-part2 (read-input real-input))
 
-
-
-; path length = depth?
-(comment
-  (let [init (zip/vector-zip (clojure.edn/read-string "[[[[[4,3],4],4],[7,[[8,4],9]]],[1,1]]"))]
-    (loop [zipper init]
-      (when (not (zip/end? zipper))
-        (prn {:path-len (count (zip/path zipper))
-              :path-nil? (nil? (zip/path zipper))
-              :node (zip/node zipper)})
-        (recur (zip/next zipper)))))
-
-
-  )
