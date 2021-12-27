@@ -1,14 +1,11 @@
 ;# [Day 20](https://adventofcode.com/2021/day/20)
 
 (ns advent-of-code-2021.day20
-  (:require [clojure.edn :as edn]
-            [clojure.java.io :as io]
+  (:require [clojure.java.io :as io]
             [clojure.set :as sets]
             [clojure.string :as string]
-            [clojure.zip :as zip]
             [nextjournal.clerk :as clerk]
-            [nextjournal.clerk.viewer :as v])
-  (:import [java.util.concurrent Executors TimeUnit]))
+            [nextjournal.clerk.viewer :as v]))
 
 
 (def real-input (slurp (io/resource "day20.txt")))
