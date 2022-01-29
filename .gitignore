@@ -13,4 +13,3 @@ pom.xml.asc
 .hg/
 *.swp
 .cache
-/publish
