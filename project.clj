@@ -6,4 +6,5 @@
   :dependencies [[org.clojure/clojure "1.10.3"]
                  [io.github.nextjournal/clerk "0.2.214"]
                  [ubergraph "0.8.2"]]
-  :repl-options {:init-ns advent-of-code-2021.core})
+  :repl-options {:init-ns advent-of-code-2021.core}
+  :aliases {"publish" ["run" "-m" "advent-of-code-2021.publish"]})

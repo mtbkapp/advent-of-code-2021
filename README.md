@@ -1,7 +1,8 @@
 # My Advent of Code 2021 Solutions
  
 
-## Usage
+## Publish
+`./publish.sh`
 
 
 ## License
