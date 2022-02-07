@@ -2,11 +2,35 @@
 
 (ns advent-of-code-2021.day22
   (:require [clojure.java.io :as io]
-            [clojure.set :as sets]
+            [clojure.spec.alpha :as spec]
             [clojure.string :as string]
-            [clojure.test :refer :all]
             [nextjournal.clerk :as clerk]
             [nextjournal.clerk.viewer :as v]))
+
+
+; I tried several solutions. A couple turned out to be theoretically unsound.
+; One seemed to be theoretically sound but was too complicated. Finally, after
+; many many failures I broke down to see what others had done and found 
+; [this blog post](https://todd.ginsberg.com/post/advent-of-code/2021/day22/)
+; that solves the problem by introducing negative volume. The way it works is
+; that a cuboid can have a positive or negative volume. Each cuboid from the 
+; input is processed in order while maintaining a list of cuboids that, when
+; their volumes are summed, represents the "on" volume so far. When each cuboid
+; from the input is processed it is compared to those cuboids currently in
+; the list. Only those that have an intersection are considered. A new cuboid
+; is calculated and is added to the list at the end of each step. The new
+; cuboid is the intersection of the two with a sign as shown in the following
+; table. If the case of the input cuboid is "on" then it is also added to the
+; list.
+; 
+; | input cuboid sign | list cuboid sign | new list cuboid sign                                  |
+; |-------------------|------------------|-------------------------------------------------------|
+; | +                 | +                | - , so overlapping "on" regions aren't counted twice  |
+; | +                 | -                | + , turn "on" cubes that were previously "off"        |
+; | -                 | +                | - , turn "off" cubes that were previously "on"        |
+; | -                 | -                | + , so overlapping "off" regions aren't counted twice |
+;
+;
 
 
 (def test-input
@@ -107,6 +131,7 @@ off x=-93533..-4276,y=-16170..68771,z=-104985..-24507")
 (def real-input (slurp (io/resource "day22.txt")))
 
 
+; ## Parsing the input
 (def range-pattern
   #"^(on|off)\sx=(\-?\d+)..(\-?\d+),y=(\-?\d+)..(\-?\d+),z=(\-?\d+)..(\-?\d+)$")
 
@@ -116,494 +141,122 @@ off x=-93533..-4276,y=-16170..68771,z=-104985..-24507")
   (map (fn [line]
          (let [[[_ op & limits]] (re-seq range-pattern (string/trim line))
                [xmin xmax ymin ymax zmin zmax] (map #(Long/valueOf %) limits)]
-           [(keyword op) [[xmin xmax] [ymin ymax] [zmin zmax]]]))
+           {:cuboid/negative? (= op "off")
+            :cuboid/xs [xmin xmax]
+            :cuboid/ys [ymin ymax]
+            :cuboid/zs [zmin zmax]}))
        (string/split-lines input)))
 
 
+(spec/def ::cuboid
+  (spec/keys :req [:cuboid/negative?
+                   :cuboid/xs
+                   :cuboid/ys
+                   :cuboid/zs]))
+
+
+(spec/def ::interval (spec/tuple int? int?))
+(spec/def :cuboid/negative? boolean?)
+(spec/def :cuboid/xs ::interval)
+(spec/def :cuboid/ys ::interval)
+(spec/def :cuboid/zs ::interval)
+
+
+; ### Cuboid Operations
+
+(defn cuboid-volume
+  [{n? :cuboid/negative?
+    [xmin xmax] :cuboid/xs
+    [ymin ymax]:cuboid/ys
+    [zmin zmax] :cuboid/zs}]
+  (* (if n? -1 1) (- (inc xmax) xmin) (- (inc ymax) ymin) (- (inc zmax) zmin)))
+
+
+(defn interval-overlaps?
+  [[a-min a-max] [b-min b-max]]
+  (not (or (< a-max b-min) (< b-max a-min))))
+
+
+(defn cuboid-overlaps?
+  [{axs :cuboid/xs ays :cuboid/ys azs :cuboid/zs}
+   {bxs :cuboid/xs bys :cuboid/ys bzs :cuboid/zs}]
+  (and (interval-overlaps? axs bxs)
+       (interval-overlaps? ays bys)
+       (interval-overlaps? azs bzs)))
+
+
+(defn interval-intersection
+  [[a-min a-max :as a] [b-min b-max :as b]]
+  (when (interval-overlaps? a b) 
+    (let [[a b c d] (sort [a-min a-max b-min b-max])]
+      [b c])))
+
+
+(defn cuboid-intersection
+  [{axs :cuboid/xs ays :cuboid/ys azs :cuboid/zs}
+   {bxs :cuboid/xs bys :cuboid/ys bzs :cuboid/zs}]
+  (let [xs (interval-intersection axs bxs)
+        ys (interval-intersection ays bys)
+        zs (interval-intersection azs bzs)]
+    (if (and (some? xs) (some? ys) (some? zs))
+      {:cuboid/xs xs
+       :cuboid/ys ys 
+       :cuboid/zs zs})))
+
+
+; ### Processing Functions
+
+(defn overlap-xform
+  [cuboid]
+  (comp (filter #(cuboid-overlaps? cuboid %))
+        (map (fn [{n? :cuboid/negative? :as c}]
+               (-> (cuboid-intersection cuboid c)
+                   (assoc :cuboid/negative? (not n?)))))))
+
+
+(defn process-cuboids
+  [cuboids]
+  (reduce (fn [cs {n? :cuboid/negative? :as cuboid}]
+            (let [ncs (into cs (overlap-xform cuboid) cs)]
+              (if n? ncs (conj ncs cuboid))))
+          []
+          cuboids))
+
+
+(defn sum-volumes
+  [cuboids]
+  (transduce (map cuboid-volume) + cuboids))
+
+
+; ### Solution Functions
 (defn solve-part1
   [input]
-  (transduce (comp (filter (fn [[_ [[x-min x-max] [y-min y-max] [z-min z-max]]]]
-                             (and (<= -50 x-min x-max 50)
-                                  (<= -50 y-min y-max 50)
-                                  (<= -50 z-min z-max 50))))
-                   (map (fn [[op [[x-min x-max] [y-min y-max] [z-min z-max]]]]
-                          [op (for [x (range x-min (inc x-max))
-                                    y (range y-min (inc y-max))
-                                    z (range z-min (inc z-max))]
-                                [x y z])])))
-             (completing
-               (fn [on-cubes [op cubes]]
-                 (if (= :on op)
-                   (sets/union on-cubes (set cubes))
-                   (sets/difference on-cubes (set cubes))))
-               count)
-             #{}
-             input))
+  (->> (parse-input input)
+       (filter (fn [{[x-min x-max] :cuboid/xs
+                     [y-min y-max] :cuboid/ys
+                     [z-min z-max] :cuboid/zs}]
+                 (and (<= -50 x-min x-max 50)
+                      (<= -50 y-min y-max 50)
+                      (<= -50 z-min z-max 50))))
+       (process-cuboids)
+       (sum-volumes)))
+
+
+(solve-part1 test-input)
+(solve-part1 test-input2)
+(solve-part1 test-input3)
+(solve-part1 real-input)
+
+
+(defn solve-part2
+  [input]
+  (->> (parse-input input)
+       (process-cuboids)  
+       (sum-volumes)))
+
+
+(solve-part2 test-input)
+(solve-part2 test-input2)
+(solve-part2 test-input3)
+(solve-part2 real-input)
 
-#_(solve-part1 (parse-input test-input))
-#_(solve-part1 (parse-input test-input2))
-#_(solve-part1 (parse-input real-input))
-
-
-; ## Part 2
-; The trouble with the previous solution is that it's too slow. The remaining
-; cuboids are much much larger.
-
-; Let's see what happens if we combine the `x`, `y`, and `z` interval that 
-; overlap.
-
-(defn interval-comparator
-  [[a-min a-max] [b-min b-max]]
-  (if (= a-min b-min)
-    (compare a-max b-max)
-    (compare a-min b-min)))
-
-(def empty-sorted-intervals
-  (sorted-set-by interval-comparator))
-
-
-; put each interval in the set
-; then reduce from left to right as only adjacent intervals can be combined.
-
-; can the combined intervals from the off steps be subtracted from the on steps?
-
-
-
-
-(defn reduce-intervals
-  [sorted-intervals]
-  (reduce (fn [is [b-min b-max :as interval]]
-            (let [[a-min a-max] (last is)]
-              (if (<= a-min b-min a-max)
-                (conj (subvec is 0 (dec (count is))) [a-min (max a-max b-max)])
-                (conj is interval))))
-          [(first sorted-intervals)]
-          (rest sorted-intervals)))
-
-
-(deftest test-reduce-intervals
-  (is (= [[1 500] [501 1000]]
-         (reduce-intervals [[1 3] [3 5] [4 500] [4 30] [501 505] [502 1000]]))))
-
-
-(defn reduce-interval-sets
-  [intervals]
-  (-> intervals
-      (update :xs reduce-intervals)
-      (update :ys reduce-intervals)
-      (update :zs reduce-intervals)))
-
-
-(defn steps->interval-sets
-  [steps]
-  (-> (reduce (fn [is [op [xs ys zs]]]
-                (-> is
-                    (update-in [op :xs] conj xs)
-                    (update-in [op :ys] conj ys)
-                    (update-in [op :zs] conj zs)))
-              {:off (zipmap [:xs :ys :zs] (repeat empty-sorted-intervals))
-               :on (zipmap [:xs :ys :zs] (repeat empty-sorted-intervals))}
-              steps)
-      (update :off reduce-interval-sets)
-      (update :on reduce-interval-sets)))
-
-#_(steps->interval-sets (parse-input test-input3))
-#_(steps->interval-sets (parse-input real-input))
-
-; turns out that both sets of intervals make a cuboid each... 
-
-
-; wo wo wo, is the off cuboid within the on cuboid? If so the answer is |on| - |off|
-#_(steps->interval-sets (parse-input real-input))
-
-(defn interval-within?
-  [[[on-min on-max]] [[off-min off-max]]]
-  (<= on-min off-min off-max on-max))
-
-(defn off-within-on?
-  [{:keys [off on]}]
-  (and (interval-within? (:xs on) (:xs off))
-       (interval-within? (:ys on) (:ys off))
-       (interval-within? (:zs on) (:zs off))))
-
-(off-within-on? (steps->interval-sets (parse-input real-input)))
-; no
-
-; fine
-
-
-; How about this part2 = |on| - |off (intersect) on|?
-
-(defn interval-sets->cuboids
-  [{{[off-xs] :xs [off-ys] :ys [off-zs] :zs} :off
-    {[on-xs] :xs [on-ys] :ys [on-zs] :zs} :on}]
-  {:off [off-xs off-ys off-zs]
-   :on [on-xs on-ys on-zs]})
-
-(interval-sets->cuboids (steps->interval-sets (parse-input real-input)))
-
-(defn intersect-interval
-  [[a-min a-max] [b-min b-max]]
-  (if-not (or (< a-max b-min) (< b-max a-min))
-    (let [[_ i-min i-max _] (sort [a-min a-max b-min b-max])]
-      [i-min i-max])))
-
-(deftest test-intersect-interval
-  (testing "non overlapping"
-    (is (nil? (intersect-interval [1 10] [11 23])))
-    (is (nil? (intersect-interval [11 23] [1 10]))))
-  (testing "a within b"
-    (is (= [5 7] (intersect-interval [5 7] [1 10])))
-    (is (= [5 7] (intersect-interval [5 7] [5 10])))
-    (is (= [5 10] (intersect-interval [5 10] [1 10]))))
-  (testing "b within a"
-    (is (= [5 7] (intersect-interval [1 10] [5 7])))
-    (is (= [5 7] (intersect-interval [5 10] [5 7])))
-    (is (= [5 10] (intersect-interval [1 10] [5 10]))))
-  (testing "overlap a then b"
-    (is (= [4 5] (intersect-interval [1 5] [4 7])))
-    (is (= [5 5] (intersect-interval [1 5] [5 7]))))
-  (testing "overlap b then a"
-    (is (= [4 5] (intersect-interval [4 7] [1 5])))
-    (is (= [5 5] (intersect-interval [5 7] [1 5]))) )
-  (testing "same interval"
-    (is (= [10 10] (intersect-interval [10 10] [10 10])))))
-
-
-(defn intersect-cuboids
-  [[a-xs a-ys a-zs] [b-xs b-ys b-zs]]
-  [(intersect-interval a-xs b-xs)
-   (intersect-interval a-ys b-ys)
-   (intersect-interval a-zs b-zs)])
-
-
-(deftest test-intersect-cuboids
-  (is (= [[3 3] [3 3] [2 2]]
-         (intersect-cuboids [[1 3] [1 3] [1 2]]
-                            [[3 8] [3 4] [2 3]]))))
-
-
-(defn cuboid-size
-  [[[x-min x-max] [y-min y-max] [z-min z-max]]]
-  (* (- (inc x-max) x-min)
-     (- (inc y-max) y-min)
-     (- (inc z-max) z-min)))
-
-
-(deftest test-cuboid-size
-  (is (= 1 (cuboid-size [[1 1] [2 2] [3 3]])))
-  (is (= 1000 (cuboid-size [[1 10] [1 10] [1 10]])))
-  (is (= (* 21 21 21) (cuboid-size [[-10 10] [-10 10] [-10 10]])))
-  (is (= 1000 (cuboid-size [[-10 -1] [-10 -1] [-10 -1]])))
-  (is (= 1 (cuboid-size [[3 3] [3 3] [2 2]]))))
-
-
-#_(= 2758514936282235 5311270970242160)
-
-#_(prn (let [{:keys [on off]} (interval-sets->cuboids (steps->interval-sets (parse-input test-input3)))]
-         (- (cuboid-size on)
-            (cuboid-size (intersect-cuboids off on)))
-         ))
-
-#_(prn (let [{:keys [on off]} (interval-sets->cuboids (steps->interval-sets (parse-input real-input)))]
-       (- (cuboid-size on)
-          (cuboid-size (intersect-cuboids on off)))
-       ))
-
-
-; 765696665928344 fail
-
-
-; I think this doesn't work because of order of operations is ignored. 
-; In the above calculation a cube is assumed to be off if it ever is in an off
-; cuboid. However if the it appeared in an off cuboid an then in an on cuboid
-; it should be considered to be on.
-
-; ok fine so, try 5;
-
-
-(defn combine-intervals
-  [is]
-  (reduce (fn [ss [b-min b-max :as curr]]
-            (let [[a-min a-max :as prev] (last ss)]
-              (if (<= a-min b-min a-max)
-                (conj (disj ss prev) [a-min (max a-max b-max)])
-                (conj ss curr))))
-          (conj empty-sorted-intervals (first is))
-          (rest is)))
-
-
-
-(defn add-interval
-  [is interval]
-  (combine-intervals (conj is interval)))
-
-(deftest test-add-interval
-  (is (= (sorted-set [2 3])
-         (add-interval empty-sorted-intervals [2 3])))
-  (is (= (sorted-set [2 3] [5 10])
-         (-> empty-sorted-intervals
-             (add-interval [2 3])
-             (add-interval [5 10]))))
-  (is (= (sorted-set [2 3] [4 10])
-         (-> empty-sorted-intervals
-             (add-interval [2 3])
-             (add-interval [5 10])
-             (add-interval [4 7]))))
-  (is (= (sorted-set [-10 0] [2 3] [4 10])
-         (-> empty-sorted-intervals
-             (add-interval [2 3])
-             (add-interval [5 10])
-             (add-interval [4 7])
-             (add-interval [-10 0]))))
-  (is (= (sorted-set [-10 10])
-         (-> empty-sorted-intervals
-             (add-interval [2 3])
-             (add-interval [5 10])
-             (add-interval [4 7])
-             (add-interval [-10 0])
-             (add-interval [-10 10])))))
-
-
-(defn clip
-  "Remove b from a. If nothing is remaining returns nil otherwise the clipped
-  interval"
-  [[a-min a-max :as a] [b-min b-max]]
-  (cond
-    (< a-max b-min) [a] ; non overlapping a then b
-    (< b-max a-min) [a] ; non overlapping b then a
-    (<= b-min a-min a-max b-max) [] ; b completely covers a
-    (< a-min b-min b-max a-max) [[a-min (dec b-min)] [(inc b-max) a-max]] ; b within a, bounds not equal
-    (and (= a-min b-min) (< b-max a-max)) [[(inc b-max) a-max]] ; a and b start at same place
-    (and (= a-max b-max) (< a-min b-min)) [[a-min (dec b-min)]] ; a and b end at same place
-    (and (< a-min b-min) (<= b-min a-max)) [[a-min (dec b-min)]] ; a then b with intersection
-    (and (< b-min a-min) (<= a-min b-max)) [[(inc b-max) a-max]] ; b then a with intersection
-    ))
-
-
-(deftest test-clip
-  (testing "non overlapping a then b"
-    (is (= [[1 3]] (clip [1 3] [4 8]))))
-  (testing "non overlapping b then a"
-    (is (= [[1 3]] (clip [1 3] [-8 0]))))
-  (testing "b covers a"
-    (is (= [] (clip [1 5] [1 5])))
-    (is (= [] (clip [1 5] [1 6])))
-    (is (= [] (clip [1 5] [0 5])))
-    (is (= [] (clip [1 5] [0 6]))))
-  (testing "b inside a"
-    (is (= [[1 1] [5 5]] (clip [1 5] [2 4])))
-    (is (= [[-50 1] [5 50]] (clip [-50 50] [2 4]))))
-  (testing "a-min = b-min"
-    (is (= [[5 5]] (clip [1 5] [1 4])))
-    (is (= [[5 8]] (clip [1 8] [1 4]))))
-  (testing "a-max = b-max"
-    (is (= [[1 1]] (clip [1 5] [2 5])))
-    (is (= [[1 3]] (clip [1 5] [4 5]))))
-  (testing "overlap with overhang a then b"
-    (is (= [[1 1]] (clip [1 5] [2 6])))
-    (is (= [[1 4]] (clip [1 5] [5 6])))
-    (is (= [[1 3]] (clip [1 5] [4 7]))))
-  (testing "overlap with overhang b then a"
-    (is (= [[2 5]] (clip [1 5] [0 1])))
-    (is (= [[4 5]] (clip [1 5] [0 3])))))
-
-
-(defn del-interval
-  [is interval]
-  (into empty-sorted-intervals
-        (mapcat #(clip % interval))
-        is))
-
-
-(deftest test-del-interval
-  (is (= (into empty-sorted-intervals [[0 2] [9 16] [21 22]])
-         (-> empty-sorted-intervals
-             (add-interval [0 11])
-             (add-interval [8 15])
-             (add-interval [19 22])
-             (del-interval [3 7])
-             (del-interval [14 20])
-             (del-interval [14 20])
-             (add-interval [11 16])
-             (del-interval [6 12])
-             (add-interval [9 13])))))
-
-
-#_(reduce (fn [s [op [xs ys zs]]]
-          (let [op-f (if (= :on op) add-interval del-interval)]
-            (-> s
-                (update :xs op-f xs)
-                (update :ys op-f ys)
-                (update :zs op-f zs))))
-        {:xs empty-sorted-intervals
-         :ys empty-sorted-intervals
-         :zs empty-sorted-intervals}
-        (parse-input test-input3))
-
-
-(defn interval-size
-  [[a-min a-max]]
-  (- (inc a-max) a-min))
-
-(defn count-cubes
-  [is]
-  (reduce (fn [c [_ intervals]]
-            (* c (reduce + (map interval-size intervals))))
-          1
-          is))
-
-; 492340769869710
-; 2758514936282235
-
-#_(println ">>>>"
-  (->
-    (reduce (fn [s [op [xs ys zs]]]
-              (let [op-f (if (= :on op) add-interval del-interval)]
-                (-> s
-                    (update :xs op-f xs)
-                    (update :ys op-f ys)
-                    (update :zs op-f zs))))
-            {:xs empty-sorted-intervals
-             :ys empty-sorted-intervals
-             :zs empty-sorted-intervals}
-            (parse-input real-input))
-    count-cubes))
-
-; 727708580029575 too low!
-
-
-; for clerk, run tests here!
-; main algorithm
-;
-; state = set of on cuboids
-; step = op = #{on off}, step-cuboid
-;
-; op = off
-; for each curr cuboid that intersects with the step cuboid split it into
-; smaller cuboids excluding the intersection
-;
-; op = on
-; do step for op = off
-; then add cuboid
-;
-; finalize
-; sum the sizes of the curr cuboids
-
-
-; cuboid - cuboid = smaller cuboids (or no cuboids)
-; Since I think the main algorithm will do lots of pairwise intersections
-; the number of smaller cuboids should be minimum. So I'm going to consider
-; all possible intersections. There are 10.
-; TODO add math for calculating 10 intersections
-
-
-(def split-cuboid nil)
-(defmulti split-cuboid (fn [A B A-clipped]
-                  (into #{}
-                        (map count)
-                        (vals A-clipped))))
-
-(def clip 1)
-(def all 0)
-(def split 2)
-
-
-; C C C | remove corner from B
-(defmethod split-cuboid #{clip} 
-  [A B A-clipped]
-  )
-
-
-; A A A | A inside B 
-(defmethod split-cuboid #{all}
-  [A B inter]
-  [])
-
-
-; S S S | B inside A
-(defmethod split-cuboid #{split}
-  [A B inter]
-  
-  )
-
-; C C A | B removes cuboid edge from A 
-(defmethod split-cuboid #{clip all}
-  [A B inter]
-  )
-
-
-; C C S | partial bisect 
-(defmethod split-cuboid #{clip all}
-  [A B inter]
-  )
-
-
-; A A C
-(defmethod split-cuboid #{all clip}
-  [A B inter]
-  )
-
-
-; A A S | B bisects A
-(defmethod split-cuboid #{all split}
-  [A B A_clipped]
-  (reduce (fn [sub-cuboids [k interval]]
-            (if (= 2 (count interval))
-              (-> sub-cuboids
-                  (assoc-in [0 k (nth interval 0)])
-                  (assoc-in [1 k (nth interval 1)]))
-              (-> sub-cuboids
-                  (assoc-in [0 k] (get A k))
-                  (assoc-in [1 k] (get A k)))))
-          [{} {}]
-          A_clipped)
-  )
-
-
-; S S A
-(defmethod split-cuboid #{split all}
-  [A B {}]
-  )
-
-
-; S S C
-(defmethod split-cuboid #{split clip}
-  [A B inter]
-  )
-
-
-; C A S | B partial bisects A
-(defmethod split-cuboid #{clip all split}
-  [A B A-clipped]
-  (reduce (fn [sub-cuboids [k interval]]
-            (case (count interval)
-              0 (let [ai (get A k)] 
-                  (-> sub-cuboids
-                      (assoc-in [0 k] ai)
-                      (assoc-in [1 k] ai)
-                      (assoc-in [2 k] ai)))
-              1 (-> sub-cuboids
-                    (assoc-in [0 k] (get A k))           ; left
-                    (assoc-in [0 k] (nth interval 0))    ; middle
-                    (assoc-in [0 k] (get A k)))          ; right
-              2 (-> sub-cuboids
-                    (assoc-in [0 k] (nth interval 0) )   ; left
-                    (assoc-in [1 k] (get B k))           ; middle
-                    (assoc-in [2 k] (nth interval 1))))) ; right
-          [{} {} {}] 
-          A-clipped))
-
-
-
-
-; another idea
-;
-; state = map of cuboids to sub-cuboids that should be subtracted from the original
-; problem what happens when the sub-cuboids overlap?
-
-
-; fail fail fail
-; negative volume is the answer!!!!!!
-
-; https://todd.ginsberg.com/post/advent-of-code/2021/day22/
