@@ -1,4 +1,4 @@
-;# [Day 15](https://adventofcode.com/2021/day/22)
+;# [Day 22](https://adventofcode.com/2021/day/22)
 
 (ns advent-of-code-2021.day22
   (:require [clojure.java.io :as io]
@@ -131,7 +131,7 @@ off x=-93533..-4276,y=-16170..68771,z=-104985..-24507")
 (def real-input (slurp (io/resource "day22.txt")))
 
 
-; ## Parsing the input
+; ### Parsing the input
 (def range-pattern
   #"^(on|off)\sx=(\-?\d+)..(\-?\d+),y=(\-?\d+)..(\-?\d+),z=(\-?\d+)..(\-?\d+)$")
 
