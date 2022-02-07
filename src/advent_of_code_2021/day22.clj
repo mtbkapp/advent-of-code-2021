@@ -20,7 +20,7 @@
 ; the list. Only those that have an intersection are considered. A new cuboid
 ; is calculated and is added to the list at the end of each step. The new
 ; cuboid is the intersection of the two with a sign as shown in the following
-; table. If the case of the input cuboid is "on" then it is also added to the
+; table. In the case that the input cuboid is "on" then it is also added to the
 ; list.
 ; 
 ; | input cuboid sign | list cuboid sign | new list cuboid sign                                  |
