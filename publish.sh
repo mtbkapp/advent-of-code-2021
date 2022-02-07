@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 
-rm -rf ./publish
+rm -rf ./docs
 lein publish

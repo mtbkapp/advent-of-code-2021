@@ -7,7 +7,7 @@
 
 (def src-dir (io/file "./src/advent_of_code_2021"))
 (def day-file-pattern #"day(\d+{2}).clj")
-(def publish-dir (io/file "./publish"))
+(def publish-dir (io/file "./docs"))
 
 
 (defn get-days
